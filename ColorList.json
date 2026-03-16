@@ -1,0 +1,28 @@
+{
+  "colors": [
+    {
+      "name": "Walnut",
+      "hex": "#5d432c"
+    },
+    {
+      "name": "Pine",
+      "hex": "#eed5ae"
+    },
+    {
+      "name": "Oak",
+      "hex": "#d1af84"
+    },
+    {
+      "name": "Maple",
+      "hex": "#eed3a4"
+    },
+    {
+      "name": "Holly",
+      "hex": "#f8f7ed"
+    },
+    {
+      "name": "Ebony",
+      "hex": "#020603"
+    }
+  ]
+}

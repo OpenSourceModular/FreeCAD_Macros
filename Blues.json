@@ -1,0 +1,44 @@
+{
+  "colors": [
+    {
+      "name": "Deep Navy",
+      "hex": "#011f4b"
+    },
+    {
+      "name": "Midnight Blue",
+      "hex": "#03396c"
+    },
+    {
+      "name": "Royal Blue",
+      "hex": "#005b96"
+    },
+    {
+      "name": "Blueberry",
+      "hex": "#283655"
+    },
+    {
+      "name": "Cerulean Blue",
+      "hex": "#3288bd"
+    },
+    {
+      "name": "Steel Blue",
+      "hex": "#6497b1"
+    },
+    {
+      "name": "Sky Blue",
+      "hex": "#82c8e5"
+    },
+    {
+      "name": "Pastel Blue",
+      "hex": "#b3cde0"
+    },
+    {
+      "name": "Powder Blue",
+      "hex": "#d0e1f9"
+    },
+    {
+      "name": "Alice Blue",
+      "hex": "#f0f8ff"
+    }
+  ]
+}
