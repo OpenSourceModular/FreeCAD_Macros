@@ -1,0 +1,355 @@
+#   Copyright (c) 2026 Justin Ahrens <justin@ahrens.net>
+#
+#   This library is free software; you can redistribute it and/or
+#   modify it under the terms of the GNU Library General Public
+#   License as published by the Free Software Foundation; either
+#   version 2 of the License, or (at your option) any later version.
+#
+#   This library  is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU Library General Public License for more details.
+#
+#   You should have received a copy of the GNU Library General Public
+#   License along with this library; see the file COPYING.LIB. If not,
+#   write to the Free Software Foundation, Inc., 59 Temple Place,
+#   Suite 330, Boston, MA  02111-1307, USA
+
+#FreeCAD Color List Macro
+
+import FreeCAD as App
+from PySide import QtWidgets, QtCore, QtGui
+import json
+import os
+
+
+class ColorListWidget(QtWidgets.QDialog):
+    def __init__(self):
+        super().__init__()
+        self.colors = []  # Store color entries: {"name": str, "color": QColor}
+        self.init_ui()
+
+    def _make_color_icon(self, color):
+        """Create a small color swatch icon for list items."""
+        size = 25
+        pixmap = QtGui.QPixmap(size, size)
+        pixmap.fill(color)
+
+        painter = QtGui.QPainter(pixmap)
+        painter.setPen(QtGui.QColor(60, 60, 60))
+        painter.drawRect(0, 0, size - 1, size - 1)
+        painter.end()
+
+        return QtGui.QIcon(pixmap)
+        
+    def init_ui(self):
+        """Initialize the user interface."""
+        self.setWindowTitle("WoodTurning Workbench Color Dialog")
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        #self.setGeometry(100, 100, 400, 500)
+        
+        top_layout = QtWidgets.QHBoxLayout()
+        left_layout = QtWidgets.QVBoxLayout()
+        right_layout = QtWidgets.QVBoxLayout()
+        # Label
+        label = QtWidgets.QLabel("Colors:")
+        left_layout.addWidget(label)
+        
+        # List widget to display colors
+        self.color_list = QtWidgets.QListWidget()
+        self.color_list.itemSelectionChanged.connect(self.on_selection_changed)
+        self.color_list.itemDoubleClicked.connect(self.edit_color)
+        left_layout.addWidget(self.color_list)
+        
+        # Buttons layout
+        button_layout = QtWidgets.QHBoxLayout()
+        
+        # Add color button
+        self.add_btn = QtWidgets.QPushButton("Add Color")
+        self.add_btn.clicked.connect(self.add_color)
+        button_layout.addWidget(self.add_btn)
+        
+        # Remove color button
+        self.remove_btn = QtWidgets.QPushButton("Remove Color")
+        self.remove_btn.clicked.connect(self.remove_color)
+        self.remove_btn.setEnabled(False)
+        button_layout.addWidget(self.remove_btn)
+        
+        left_layout.addLayout(button_layout)
+
+        move_layout = QtWidgets.QHBoxLayout()
+
+        self.move_up_btn = QtWidgets.QPushButton("Move Up")
+        self.move_up_btn.clicked.connect(self.move_color_up)
+        self.move_up_btn.setEnabled(False)
+        move_layout.addWidget(self.move_up_btn)
+
+        self.move_down_btn = QtWidgets.QPushButton("Move Down")
+        self.move_down_btn.clicked.connect(self.move_color_down)
+        self.move_down_btn.setEnabled(False)
+        move_layout.addWidget(self.move_down_btn)
+
+        left_layout.addLayout(move_layout)
+        
+        # Apply color button
+        self.apply_btn = QtWidgets.QPushButton("Apply to Selected Object")
+        self.apply_btn.clicked.connect(self.apply_color)
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.setStyleSheet("font-weight: bold;")
+        right_layout.addWidget(self.apply_btn)
+        
+        # Clear all button
+        self.clear_btn = QtWidgets.QPushButton("Clear All")
+        self.clear_btn.clicked.connect(self.clear_all)
+        right_layout.addWidget(self.clear_btn)
+        
+        # Save current list button
+        self.save_btn = QtWidgets.QPushButton("Save Current List")
+        self.save_btn.clicked.connect(self.save_colors_to_json)
+        self.save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        right_layout.addWidget(self.save_btn)
+        
+        top_layout.addLayout(left_layout)
+        top_layout.addLayout(right_layout)
+        
+        self.setLayout(top_layout)
+        
+        # Pre-populate with colors from JSON file
+        self.populate_predefined_colors()
+        
+    def add_color(self):
+        """Open color dialog and add selected color to list."""
+        color = QtWidgets.QColorDialog.getColor()
+        if color.isValid():
+            color_name, ok = QtWidgets.QInputDialog.getText(
+                self,
+                "Color Name",
+                "Enter a name for this color:",
+                text=color.name()
+            )
+            if not ok:
+                return
+            color_name = color_name.strip() or color.name()
+            self.colors.append({"name": color_name, "color": color})
+            item = QtWidgets.QListWidgetItem()
+            item.setText(color_name)
+            item.setIcon(self._make_color_icon(color))
+            self.color_list.addItem(item)
+
+    def edit_color(self, item):
+        """Edit the color and name of the selected list item."""
+        current_row = self.color_list.row(item)
+        if current_row < 0:
+            return
+
+        current_entry = self.colors[current_row]
+        current_color = current_entry["color"]
+
+        color = QtWidgets.QColorDialog.getColor(current_color, self)
+        if not color.isValid():
+            return
+
+        color_name, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Color Name",
+            "Enter a name for this color:",
+            text=current_entry["name"]
+        )
+        if not ok:
+            return
+        color_name = color_name.strip() or current_entry["name"]
+
+        self.colors[current_row] = {"name": color_name, "color": color}
+        item.setText(color_name)
+        item.setIcon(self._make_color_icon(color))
+            
+    def remove_color(self):
+        """Remove selected color from list."""
+        current_row = self.color_list.currentRow()
+        if current_row >= 0:
+            self.color_list.takeItem(current_row)
+            self.colors.pop(current_row)
+            
+    def clear_all(self):
+        """Clear all colors from the list."""
+        reply = QtWidgets.QMessageBox.question(
+            self, 
+            "Confirm", 
+            "Clear all colors?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.color_list.clear()
+            self.colors.clear()
+            
+    def on_selection_changed(self):
+        """Enable/disable buttons based on selection."""
+        current_row = self.color_list.currentRow()
+        has_selection = current_row >= 0
+        self.remove_btn.setEnabled(has_selection)
+        self.apply_btn.setEnabled(has_selection)
+        self.move_up_btn.setEnabled(has_selection and current_row > 0)
+        self.move_down_btn.setEnabled(
+            has_selection and current_row < (self.color_list.count() - 1)
+        )
+
+    def _swap_rows(self, row_a, row_b):
+        if row_a == row_b:
+            return
+        if row_a < 0 or row_b < 0:
+            return
+        if row_a >= self.color_list.count() or row_b >= self.color_list.count():
+            return
+
+        self.colors[row_a], self.colors[row_b] = self.colors[row_b], self.colors[row_a]
+
+        item_a = self.color_list.takeItem(row_a)
+        item_b = self.color_list.takeItem(row_b - 1 if row_b > row_a else row_b)
+
+        if row_b > row_a:
+            self.color_list.insertItem(row_a, item_b)
+            self.color_list.insertItem(row_b, item_a)
+            self.color_list.setCurrentRow(row_b)
+        else:
+            self.color_list.insertItem(row_b, item_a)
+            self.color_list.insertItem(row_a, item_b)
+            self.color_list.setCurrentRow(row_b)
+
+    def move_color_up(self):
+        """Move the selected color up by one row."""
+        current_row = self.color_list.currentRow()
+        if current_row <= 0:
+            return
+        self._swap_rows(current_row, current_row - 1)
+
+    def move_color_down(self):
+        """Move the selected color down by one row."""
+        current_row = self.color_list.currentRow()
+        if current_row < 0 or current_row >= self.color_list.count() - 1:
+            return
+        self._swap_rows(current_row, current_row + 1)
+        
+    def populate_predefined_colors(self):
+        """Pre-populate the color list from a JSON file."""
+        # Get the directory of this macro
+        macro_dir = os.path.dirname(os.path.abspath(__file__))
+        colors_file = os.path.join(macro_dir, "ColorListWidget_colors.json")
+        
+        try:
+            with open(colors_file, 'r') as f:
+                data = json.load(f)
+                colors_data = data.get("colors", [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Fallback to default colors if file not found
+            colors_data = [
+                {"name": "Walnut Brown", "hex": "#773F1A"},
+                {"name": "Saddle Brown", "hex": "#8B4513"},
+                {"name": "Sienna", "hex": "#A0522D"},
+                {"name": "Wheat", "hex": "#F5DEB3"},
+                {"name": "Tan", "hex": "#D4A574"},
+                {"name": "Burlywood", "hex": "#DEB887"},
+            ]
+        
+        # Add colors to the list
+        for color_data in colors_data:
+            color_name = color_data.get("name", "Unnamed Color")
+            hex_color = color_data.get("hex", "#000000")
+            color = QtGui.QColor(hex_color)
+
+            self.colors.append({"name": color_name, "color": color})
+            item = QtWidgets.QListWidgetItem()
+            item.setText(color_name)
+            item.setIcon(self._make_color_icon(color))
+            self.color_list.addItem(item)
+        
+    def save_colors_to_json(self):
+        """Save the current list of colors to the JSON file."""
+        # Get the directory of this macro
+        macro_dir = os.path.dirname(os.path.abspath(__file__))
+        colors_file = os.path.join(macro_dir, "ColorListWidget_colors.json")
+        
+        # Build the colors data
+        colors_data = []
+        for color_entry in self.colors:
+            colors_data.append({
+                "name": color_entry["name"],
+                "hex": color_entry["color"].name()
+            })
+        
+        # Write to JSON file
+        try:
+            with open(colors_file, 'w') as f:
+                json.dump({"colors": colors_data}, f, indent=2)
+            
+            QtWidgets.QMessageBox.information(
+                self,
+                "Success",
+                f"Saved {len(colors_data)} colors to {os.path.basename(colors_file)}."
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to save colors: {str(e)}"
+            )
+        
+    def apply_color(self):
+        """Apply selected color to the currently selected FreeCAD object."""
+        current_row = self.color_list.currentRow()
+        if current_row < 0:
+            QtWidgets.QMessageBox.warning(self, "Error", "No color selected.")
+            return
+            
+        # Get selected color
+        selected_color_entry = self.colors[current_row]
+        selected_color = selected_color_entry["color"]
+        selected_color_name = selected_color_entry["name"]
+        
+        # Get selected objects in FreeCAD
+        selected_objects = FreeCAD.Gui.Selection.getSelection()
+        if not selected_objects:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Error", 
+                "No object selected in FreeCAD.\nPlease select an object first."
+            )
+            return
+        
+        # Apply color to each selected object
+        for obj in selected_objects:
+            try:
+                # Convert QColor to RGB tuple (normalized to 0-1)
+                r = selected_color.red() / 255.0
+                g = selected_color.green() / 255.0
+                b = selected_color.blue() / 255.0
+                
+                # Set the color properties
+                if hasattr(obj, "ViewObject"):
+                    obj.ViewObject.ShapeColor = (r, g, b, 1.0)
+                    
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Applied color {selected_color_name} to {obj.Label}."
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to apply color: {str(e)}"
+                )
+
+
+# Main execution
+if __name__ == "__main__":
+    dialog = ColorListWidget()
+    # Make it modeless so you can interact with FreeCAD while the dialog is open
+    dialog.setWindowModality(QtCore.Qt.NonModal)
+    dialog.show()
+    screen = QtWidgets.QApplication.primaryScreen()
+    if screen is not None:
+        dialog.move(screen.availableGeometry().topLeft())
+    else:
+        dialog.move(0, 0)
+    # Store reference to prevent garbage collection
+    FreeCAD.Gui.MainWindow.color_list_dialog = dialog
