@@ -18,12 +18,15 @@
 #FreeCAD Color List Macro
 
 import FreeCAD as App
+import FreeCADGui as Gui
 from PySide import QtWidgets, QtCore, QtGui
 import json
 import os
 
 
 class ColorListWidget(QtWidgets.QDialog):
+    LAST_OPENED_FILE_KEY = "ColorListLastOpenedFile"
+
     def __init__(self):
         super().__init__()
         self.colors = []  # Store color entries: {"name": str, "color": QColor}
@@ -44,7 +47,7 @@ class ColorListWidget(QtWidgets.QDialog):
         
     def init_ui(self):
         """Initialize the user interface."""
-        self.setWindowTitle("WoodTurning Workbench Color Dialog")
+        self.setWindowTitle("FreeCAD Color List")
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
         #self.setGeometry(100, 100, 400, 500)
         
@@ -52,7 +55,7 @@ class ColorListWidget(QtWidgets.QDialog):
         left_layout = QtWidgets.QVBoxLayout()
         right_layout = QtWidgets.QVBoxLayout()
         # Label
-        label = QtWidgets.QLabel("Colors:")
+        label = QtWidgets.QLabel("Color List:")
         left_layout.addWidget(label)
         
         # List widget to display colors
@@ -97,6 +100,12 @@ class ColorListWidget(QtWidgets.QDialog):
         self.apply_btn.setEnabled(False)
         self.apply_btn.setStyleSheet("font-weight: bold;")
         right_layout.addWidget(self.apply_btn)
+
+        # Apply color to all objects button
+        self.apply_all_btn = QtWidgets.QPushButton("Apply to all Objects")
+        self.apply_all_btn.clicked.connect(self.apply_color_to_all_objects)
+        self.apply_all_btn.setEnabled(False)
+        right_layout.addWidget(self.apply_all_btn)
         
         # Clear all button
         self.clear_btn = QtWidgets.QPushButton("Clear All")
@@ -108,7 +117,14 @@ class ColorListWidget(QtWidgets.QDialog):
         self.save_btn.clicked.connect(self.save_colors_to_json)
         self.save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         right_layout.addWidget(self.save_btn)
+
+        # Load color list button
+        self.load_btn = QtWidgets.QPushButton("Load Color List")
+        self.load_btn.clicked.connect(self.load_colors_from_json)
+        right_layout.addWidget(self.load_btn)
         
+        right_layout.setAlignment(QtCore.Qt.AlignBottom)
+
         top_layout.addLayout(left_layout)
         top_layout.addLayout(right_layout)
         
@@ -188,6 +204,7 @@ class ColorListWidget(QtWidgets.QDialog):
         has_selection = current_row >= 0
         self.remove_btn.setEnabled(has_selection)
         self.apply_btn.setEnabled(has_selection)
+        self.apply_all_btn.setEnabled(has_selection)
         self.move_up_btn.setEnabled(has_selection and current_row > 0)
         self.move_down_btn.setEnabled(
             has_selection and current_row < (self.color_list.count() - 1)
@@ -230,10 +247,15 @@ class ColorListWidget(QtWidgets.QDialog):
         self._swap_rows(current_row, current_row + 1)
         
     def populate_predefined_colors(self):
-        """Pre-populate the color list from a JSON file."""
+        """Load startup colors from last opened file, or ColorList.json by default."""
         # Get the directory of this macro
-        macro_dir = os.path.dirname(os.path.abspath(__file__))
-        colors_file = os.path.join(macro_dir, "ColorListWidget_colors.json")
+        p = App.ParamGet("User parameter:BaseApp/Preferences/Macro")
+        macro_dir = p.GetString("MacroPath", App.getUserAppDataDir())
+        default_file = os.path.join(macro_dir, "ColorList.json")
+        last_opened_file = p.GetString(self.LAST_OPENED_FILE_KEY, "")
+        colors_file = last_opened_file if last_opened_file else default_file
+        if not os.path.isfile(colors_file):
+            colors_file = default_file
         
         try:
             with open(colors_file, 'r') as f:
@@ -242,12 +264,12 @@ class ColorListWidget(QtWidgets.QDialog):
         except (FileNotFoundError, json.JSONDecodeError):
             # Fallback to default colors if file not found
             colors_data = [
-                {"name": "Walnut Brown", "hex": "#773F1A"},
-                {"name": "Saddle Brown", "hex": "#8B4513"},
-                {"name": "Sienna", "hex": "#A0522D"},
-                {"name": "Wheat", "hex": "#F5DEB3"},
-                {"name": "Tan", "hex": "#D4A574"},
-                {"name": "Burlywood", "hex": "#DEB887"},
+                {"name": "Walnut", "hex": "#5D432C"},
+                {"name": "Pine", "hex": "#EED5AE"},
+                {"name": "Oak", "hex": "#D1AF84"},
+                {"name": "Maple", "hex": "#EED3A4"},
+                {"name": "Holly", "hex": "#F8F7ED"},
+                {"name": "Ebony", "hex": "#020603"},
             ]
         
         # Add colors to the list
@@ -265,8 +287,19 @@ class ColorListWidget(QtWidgets.QDialog):
     def save_colors_to_json(self):
         """Save the current list of colors to the JSON file."""
         # Get the directory of this macro
-        macro_dir = os.path.dirname(os.path.abspath(__file__))
-        colors_file = os.path.join(macro_dir, "ColorListWidget_colors.json")
+        p = App.ParamGet("User parameter:BaseApp/Preferences/Macro")
+        macro_dir = p.GetString("MacroPath", App.getUserAppDataDir())
+        default_file = os.path.join(macro_dir, "ColorList.json")
+        colors_file, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Color List",
+            default_file,
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if not colors_file:
+            return
+        if not os.path.splitext(colors_file)[1]:
+            colors_file += ".json"
         
         # Build the colors data
         colors_data = []
@@ -292,6 +325,70 @@ class ColorListWidget(QtWidgets.QDialog):
                 "Error",
                 f"Failed to save colors: {str(e)}"
             )
+
+    def load_colors_from_json(self):
+        """Load colors from a user-selected JSON file."""
+        p = App.ParamGet("User parameter:BaseApp/Preferences/Macro")
+        macro_dir = p.GetString("MacroPath", App.getUserAppDataDir())
+        last_opened_file = p.GetString(self.LAST_OPENED_FILE_KEY, "")
+        start_dir = os.path.dirname(last_opened_file) if os.path.isfile(last_opened_file) else macro_dir
+
+        colors_file, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Color List",
+            start_dir,
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if not colors_file:
+            return
+
+        try:
+            with open(colors_file, 'r') as f:
+                data = json.load(f)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to load colors: {str(e)}"
+            )
+            return
+
+        colors_data = data.get("colors", [])
+        if not isinstance(colors_data, list):
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                "Invalid color file format: 'colors' must be a list."
+            )
+            return
+
+        p.SetString(self.LAST_OPENED_FILE_KEY, colors_file)
+
+        self.color_list.clear()
+        self.colors.clear()
+
+        skipped = 0
+        for color_data in colors_data:
+            color_name = color_data.get("name", "Unnamed Color")
+            hex_color = color_data.get("hex", "#000000")
+            color = QtGui.QColor(hex_color)
+            if not color.isValid():
+                skipped += 1
+                continue
+
+            self.colors.append({"name": color_name, "color": color})
+            item = QtWidgets.QListWidgetItem()
+            item.setText(color_name)
+            item.setIcon(self._make_color_icon(color))
+            self.color_list.addItem(item)
+
+        self.on_selection_changed()
+
+        message = f"Loaded {len(self.colors)} colors from {os.path.basename(colors_file)}."
+        if skipped:
+            message += f" Skipped {skipped} invalid color entr{'y' if skipped == 1 else 'ies'}."
+
+        QtWidgets.QMessageBox.information(self, "Success", message)
         
     def apply_color(self):
         """Apply selected color to the currently selected FreeCAD object."""
@@ -326,19 +423,50 @@ class ColorListWidget(QtWidgets.QDialog):
                 # Set the color properties
                 if hasattr(obj, "ViewObject"):
                     obj.ViewObject.ShapeColor = (r, g, b, 1.0)
-                    
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Success",
-                    f"Applied color {selected_color_name} to {obj.Label}."
-                )
+                
             except Exception as e:
                 QtWidgets.QMessageBox.critical(
                     self,
                     "Error",
                     f"Failed to apply color: {str(e)}"
                 )
+        Gui.Selection.clearSelection()
 
+    def apply_color_to_all_objects(self):
+        """Apply selected color to all objects in the active FreeCAD document."""
+        current_row = self.color_list.currentRow()
+        if current_row < 0:
+            QtWidgets.QMessageBox.warning(self, "Error", "No color selected.")
+            return
+
+        if App.ActiveDocument is None:
+            QtWidgets.QMessageBox.warning(self, "Error", "No active FreeCAD document.")
+            return
+
+        selected_color_entry = self.colors[current_row]
+        selected_color = selected_color_entry["color"]
+
+        r = selected_color.red() / 255.0
+        g = selected_color.green() / 255.0
+        b = selected_color.blue() / 255.0
+
+        applied_count = 0
+        for obj in App.ActiveDocument.Objects:
+            try:
+                if hasattr(obj, "ViewObject") and hasattr(obj.ViewObject, "ShapeColor"):
+                    obj.ViewObject.ShapeColor = (r, g, b, 1.0)
+                    applied_count += 1
+            except Exception:
+                continue
+
+        if applied_count == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Apply to all Objects",
+                "No objects with a colorable shape were found in the active document."
+            )
+            return
+        Gui.Selection.clearSelection()
 
 # Main execution
 if __name__ == "__main__":
@@ -352,4 +480,5 @@ if __name__ == "__main__":
     else:
         dialog.move(0, 0)
     # Store reference to prevent garbage collection
-    FreeCAD.Gui.MainWindow.color_list_dialog = dialog
+    #FreeCAD.Gui.MainWindow.color_list_dialog = dialog
+    App.Gui.getMainWindow().color_list_dialog = dialog
