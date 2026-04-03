@@ -22,6 +22,7 @@ import FreeCADGui as Gui
 from PySide import QtWidgets, QtCore, QtGui
 import json
 import os
+import random
 
 
 class ColorListWidget(QtWidgets.QDialog):
@@ -106,7 +107,12 @@ class ColorListWidget(QtWidgets.QDialog):
         self.apply_all_btn.clicked.connect(self.apply_color_to_all_objects)
         self.apply_all_btn.setEnabled(False)
         right_layout.addWidget(self.apply_all_btn)
-        
+
+        # Random color assignment button
+        self.random_btn = QtWidgets.QPushButton("Random")
+        self.random_btn.clicked.connect(self.apply_random_colors)
+        right_layout.addWidget(self.random_btn)
+
         # Clear all button
         self.clear_btn = QtWidgets.QPushButton("Clear All")
         self.clear_btn.clicked.connect(self.clear_all)
@@ -466,6 +472,46 @@ class ColorListWidget(QtWidgets.QDialog):
                 "No objects with a colorable shape were found in the active document."
             )
             return
+        Gui.Selection.clearSelection()
+
+    def apply_random_colors(self):
+        """Randomly assign each selected FreeCAD object a color from the list.
+        Colors are not repeated until every color in the list has been used."""
+        if not self.colors:
+            QtWidgets.QMessageBox.warning(self, "Error", "No colors in the list.")
+            return
+
+        selected_objects = Gui.Selection.getSelection()
+        if not selected_objects:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Error",
+                "No objects selected in FreeCAD.\nPlease select objects first."
+            )
+            return
+
+        deck = list(range(len(self.colors)))
+        random.shuffle(deck)
+
+        for obj in selected_objects:
+            if not deck:
+                deck = list(range(len(self.colors)))
+                random.shuffle(deck)
+
+            color = self.colors[deck.pop()]["color"]
+            r = color.red() / 255.0
+            g = color.green() / 255.0
+            b = color.blue() / 255.0
+
+            try:
+                if hasattr(obj, "ViewObject"):
+                    obj.ViewObject.ShapeColor = (r, g, b, 1.0)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self, "Error", f"Failed to apply color: {str(e)}"
+                )
+                return
+
         Gui.Selection.clearSelection()
 
 # Main execution
