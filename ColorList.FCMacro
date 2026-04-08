@@ -45,6 +45,61 @@ class ColorListWidget(QtWidgets.QDialog):
         painter.end()
 
         return QtGui.QIcon(pixmap)
+
+    def _color_to_rgba(self, color):
+        """Convert QColor to FreeCAD color tuple in 0-1 range."""
+        return (
+            color.red() / 255.0,
+            color.green() / 255.0,
+            color.blue() / 255.0,
+            1.0,
+        )
+
+    def _set_object_shape_color(self, obj, rgba):
+        """Set ShapeColor when available; return True only if the value changed."""
+        if not hasattr(obj, "ViewObject"):
+            return False
+        view_obj = obj.ViewObject
+        if not hasattr(view_obj, "ShapeColor"):
+            return False
+
+        current = view_obj.ShapeColor
+        try:
+            current_tuple = tuple(current)
+        except Exception:
+            current_tuple = ()
+
+        if len(current_tuple) == 3:
+            current_tuple = (current_tuple[0], current_tuple[1], current_tuple[2], 1.0)
+
+        if current_tuple == rgba:
+            return False
+
+        view_obj.ShapeColor = rgba
+        return True
+
+    def _run_in_undo_transaction(self, label, action):
+        """Run a mutating action in one FreeCAD undo transaction."""
+        doc = App.ActiveDocument
+        if doc is None:
+            return None
+
+        opened = False
+        try:
+            doc.openTransaction(label)
+            opened = True
+            changed_count = action()
+            if changed_count:
+                doc.commitTransaction()
+            elif hasattr(doc, "abortTransaction"):
+                doc.abortTransaction()
+            else:
+                doc.commitTransaction()
+            return changed_count
+        except Exception:
+            if opened and hasattr(doc, "abortTransaction"):
+                doc.abortTransaction()
+            raise
         
     def init_ui(self):
         """Initialize the user interface."""
@@ -407,9 +462,10 @@ class ColorListWidget(QtWidgets.QDialog):
         selected_color_entry = self.colors[current_row]
         selected_color = selected_color_entry["color"]
         selected_color_name = selected_color_entry["name"]
+        selected_rgba = self._color_to_rgba(selected_color)
         
         # Get selected objects in FreeCAD
-        selected_objects = FreeCAD.Gui.Selection.getSelection()
+        selected_objects = Gui.Selection.getSelection()
         if not selected_objects:
             QtWidgets.QMessageBox.warning(
                 self, 
@@ -417,25 +473,39 @@ class ColorListWidget(QtWidgets.QDialog):
                 "No object selected in FreeCAD.\nPlease select an object first."
             )
             return
-        
-        # Apply color to each selected object
-        for obj in selected_objects:
-            try:
-                # Convert QColor to RGB tuple (normalized to 0-1)
-                r = selected_color.red() / 255.0
-                g = selected_color.green() / 255.0
-                b = selected_color.blue() / 255.0
-                
-                # Set the color properties
-                if hasattr(obj, "ViewObject"):
-                    obj.ViewObject.ShapeColor = (r, g, b, 1.0)
-                
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to apply color: {str(e)}"
-                )
+
+        if App.ActiveDocument is None:
+            QtWidgets.QMessageBox.warning(self, "Error", "No active FreeCAD document.")
+            return
+
+        def apply_selected():
+            changed = 0
+            for obj in selected_objects:
+                if self._set_object_shape_color(obj, selected_rgba):
+                    changed += 1
+            return changed
+
+        try:
+            changed_count = self._run_in_undo_transaction(
+                f"ColorList: Apply '{selected_color_name}'",
+                apply_selected,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to apply color: {str(e)}"
+            )
+            return
+
+        if changed_count == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Apply to Selected Object",
+                "No selected objects with a colorable shape were changed."
+            )
+            return
+
         Gui.Selection.clearSelection()
 
     def apply_color_to_all_objects(self):
@@ -451,25 +521,34 @@ class ColorListWidget(QtWidgets.QDialog):
 
         selected_color_entry = self.colors[current_row]
         selected_color = selected_color_entry["color"]
+        selected_color_name = selected_color_entry["name"]
+        selected_rgba = self._color_to_rgba(selected_color)
 
-        r = selected_color.red() / 255.0
-        g = selected_color.green() / 255.0
-        b = selected_color.blue() / 255.0
-
-        applied_count = 0
-        for obj in App.ActiveDocument.Objects:
-            try:
-                if hasattr(obj, "ViewObject") and hasattr(obj.ViewObject, "ShapeColor"):
-                    obj.ViewObject.ShapeColor = (r, g, b, 1.0)
+        def apply_all():
+            applied_count = 0
+            for obj in App.ActiveDocument.Objects:
+                if self._set_object_shape_color(obj, selected_rgba):
                     applied_count += 1
-            except Exception:
-                continue
+            return applied_count
+
+        try:
+            applied_count = self._run_in_undo_transaction(
+                f"ColorList: Apply '{selected_color_name}' to all",
+                apply_all,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to apply color to all objects: {str(e)}"
+            )
+            return
 
         if applied_count == 0:
             QtWidgets.QMessageBox.information(
                 self,
                 "Apply to all Objects",
-                "No objects with a colorable shape were found in the active document."
+                "No objects with a colorable shape were changed in the active document."
             )
             return
         Gui.Selection.clearSelection()
@@ -493,24 +572,42 @@ class ColorListWidget(QtWidgets.QDialog):
         deck = list(range(len(self.colors)))
         random.shuffle(deck)
 
-        for obj in selected_objects:
-            if not deck:
-                deck = list(range(len(self.colors)))
-                random.shuffle(deck)
+        if App.ActiveDocument is None:
+            QtWidgets.QMessageBox.warning(self, "Error", "No active FreeCAD document.")
+            return
 
-            color = self.colors[deck.pop()]["color"]
-            r = color.red() / 255.0
-            g = color.green() / 255.0
-            b = color.blue() / 255.0
+        def apply_random():
+            nonlocal deck
+            changed = 0
+            for obj in selected_objects:
+                if not deck:
+                    deck = list(range(len(self.colors)))
+                    random.shuffle(deck)
 
-            try:
-                if hasattr(obj, "ViewObject"):
-                    obj.ViewObject.ShapeColor = (r, g, b, 1.0)
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(
-                    self, "Error", f"Failed to apply color: {str(e)}"
-                )
-                return
+                color = self.colors[deck.pop()]["color"]
+                rgba = self._color_to_rgba(color)
+                if self._set_object_shape_color(obj, rgba):
+                    changed += 1
+            return changed
+
+        try:
+            changed_count = self._run_in_undo_transaction(
+                "ColorList: Apply random colors",
+                apply_random,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error", f"Failed to apply color: {str(e)}"
+            )
+            return
+
+        if changed_count == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Random",
+                "No selected objects with a colorable shape were changed."
+            )
+            return
 
         Gui.Selection.clearSelection()
 
