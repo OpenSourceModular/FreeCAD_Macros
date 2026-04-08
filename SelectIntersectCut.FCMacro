@@ -1,0 +1,215 @@
+import FreeCAD as App
+import FreeCADGui
+from PySide.QtWidgets import QDialog, QPushButton, QVBoxLayout, QTextEdit, QMessageBox
+from PySide.QtCore import Qt
+import Draft
+from BOPTools import BOPFeatures
+import Part
+
+
+doc = App.ActiveDocument
+class SelectionDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setWindowTitle("Select Intersect Cut")
+        self.set_a = []
+        self.set_b = []
+        
+        layout = QVBoxLayout()
+        
+        btn_select_obj_a = QPushButton("Select Object A")
+        btn_select_obj_a.clicked.connect(self.select_a)
+        layout.addWidget(btn_select_obj_a)
+        
+        btn_select_set_b = QPushButton("Select Set B")
+        btn_select_set_b.clicked.connect(self.select_b)
+        layout.addWidget(btn_select_set_b)
+        
+        btn_intersect = QPushButton("Clone Object A and intersect with Set B")
+        btn_intersect.clicked.connect(self.a_intersect)
+        layout.addWidget(btn_intersect)
+
+        btn_cut = QPushButton("Clone Object A and cut with Set B")
+        btn_cut.clicked.connect(self.a_cut)
+        layout.addWidget(btn_cut)
+
+        btn_about = QPushButton("About")
+        btn_about.clicked.connect(self.show_about)
+        layout.addWidget(btn_about)
+
+        self.setLayout(layout)
+    
+    def show_about(self):
+        about = AboutDialog(self)
+        about.exec()
+
+    def closeEvent(self, event):
+        self.close()
+        event.accept()
+
+    def show_error(self, message):
+        QMessageBox.warning(self, "Selection Error", message)
+        print(message)
+
+    def hide_object_a(self):
+        if len(self.set_a) != 1:
+            return
+
+        try:
+            self.set_a[0].ViewObject.Visibility = False
+        except Exception as error:
+            print(f"Could not hide Object A: {error}")
+    
+    def select_a(self):
+        selection = FreeCADGui.Selection.getSelection()
+        if len(selection) != 1:
+            self.show_error("Select exactly one object for Set A.")
+            return
+
+        self.set_a = [selection[0]]
+        print(f"Set A: {[obj.Name for obj in self.set_a]}")
+        FreeCADGui.Selection.clearSelection()
+    
+    def select_b(self):
+        selection = FreeCADGui.Selection.getSelection()
+        if len(selection) < 2:
+            self.show_error("Select two or more objects for Set B.")
+            return
+
+        self.set_b = list(selection)
+        print(f"Set B: {[obj.Name for obj in self.set_b]}")
+        FreeCADGui.Selection.clearSelection()
+    
+    def a_cut(self):
+        print("Cutting cloned Set A with Set B")
+
+        if doc is None:
+            print("No active document.")
+            return
+
+        doc.openTransaction("SelectIntersectCut Cut")
+
+        set_a_clones = []
+        try:
+            for j in range(0,len(self.set_b)):
+                view_obj = self.set_a[0]
+                cloned_object = Draft.clone(view_obj)
+                set_a_clones.append(cloned_object)
+            intersection_list = []
+            for a in range(0,len(set_a_clones)):
+                bp = BOPFeatures.BOPFeatures(App.activeDocument())
+                new_common = bp.make_cut([self.set_b[a].Name] + [set_a_clones[a].Name])
+                #new_common.Label = f"Intersection_{a+1:03d}"
+                intersection_list.append(new_common.Name)
+                doc.recompute()
+                try:
+                    obj = doc.getObject(new_common.Name)
+                    #r_ = 118/256
+                    #g_ = 81/256
+                    #b_ = 68/256
+                    #obj.ViewObject.ShapeColor = (r_, g_, b_)
+                    if (obj.Shape.Volume < 0.1):
+                        doc.removeObject(new_common.Name)
+                except Exception as e:
+                    print(e)
+            if True:
+                for a in range(0,len(intersection_list)):
+                    a_name = "Common001"
+                    s = doc.getObject(intersection_list[a]).Shape.Faces
+                    #s = App.ActiveDocument.Common.Shape.Faces
+                    s = Part.Solid(Part.Shell(s))
+                    o = App.ActiveDocument.addObject("Part::Feature","Common_solid")
+                    #o.Label="Intersection_014 (Solid)"
+                    o.Shape=s
+                    del s, o
+                    doc.removeObject(intersection_list[a])  
+            for  a in range(0,len(set_a_clones)):
+                doc.removeObject(set_a_clones[a].Name)
+            doc.recompute()
+            self.hide_object_a()
+            doc.commitTransaction()
+        except Exception:
+            doc.abortTransaction()
+            raise
+
+    def a_intersect(self):
+        print("Intersecting cloned Set A with Set B")
+
+        if doc is None:
+            print("No active document.")
+            return
+
+        doc.openTransaction("SelectIntersectCut Intersect")
+
+        set_a_clones = []
+        try:
+            for j in range(0,len(self.set_b)):
+                view_obj = self.set_a[0]
+                cloned_object = Draft.clone(view_obj)
+                set_a_clones.append(cloned_object)
+            intersection_list = []
+            for a in range(0,len(set_a_clones)):
+                bp = BOPFeatures.BOPFeatures(App.activeDocument())
+                new_common = bp.make_multi_common([self.set_b[a].Name] + [set_a_clones[a].Name])
+                #new_common.Label = f"Intersection_{a+1:03d}"
+                intersection_list.append(new_common.Name)
+                doc.recompute()
+                try:
+                    obj = doc.getObject(new_common.Name)
+                    #r_ = 118/256
+                    #g_ = 81/256
+                    #b_ = 68/256
+                    #obj.ViewObject.ShapeColor = (r_, g_, b_)
+                    if (obj.Shape.Volume < 0.1):
+                        doc.removeObject(new_common.Name)
+                except Exception as e:
+                    print(e)
+            print(intersection_list)
+            if True:
+                for a in range(0,len(intersection_list)):
+                    a_name = "Common001"
+                    s = doc.getObject(intersection_list[a]).Shape.Faces
+                    #s = App.ActiveDocument.Common.Shape.Faces
+                    s = Part.Solid(Part.Shell(s))
+                    o = App.ActiveDocument.addObject("Part::Feature","Common_solid")
+                    #o.Label="Intersection_014 (Solid)"
+                    o.Shape=s
+                    del s, o
+                    doc.removeObject(intersection_list[a])  
+            for  a in range(0,len(set_a_clones)):
+                doc.removeObject(set_a_clones[a].Name)
+            doc.recompute()
+            self.hide_object_a()
+            doc.commitTransaction()
+        except Exception:
+            doc.abortTransaction()
+            raise
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("About")
+        layout = QVBoxLayout()
+
+        text_box = QTextEdit()
+        text_box.setPlainText("Select and intersect/cut objects in FreeCAD.\n\n" \
+        "Author: Justin Ahrens\nVersion: 1.0 \n\nInstructions:\n1. Select one objects for Set A and multiple objects for Set B using the buttons.\n" \
+        "2. The Clone and Intersect button will clone Object A for each Object B and perform the intersection operation.   \n" \
+        "3. The Clone and Cut button will clone Object A for each Object B and perform the cut operation.   \n" \
+        "https://github.com/OpenSourceModular/FreeCAD_Macros")
+
+        text_box.setReadOnly(True)
+        layout.addWidget(text_box)
+
+        self.setLayout(layout)
+
+
+def main():
+    """Main function to launch the selection dialog."""
+    dialog = SelectionDialog(FreeCADGui.getMainWindow())
+    dialog.show()
+
+
+if __name__ == "__main__":
+    main()
